@@ -1,0 +1,156 @@
+esphome:
+  name: airgradient
+  platform: ESP8266
+  board: d1_mini_pro
+
+# Enable logging
+logger:
+  level: INFO
+
+#wifi:
+#  ssid: YOUR_SSID
+#  password: YOUR_PASSWORD
+
+captive_portal:
+
+mqtt:
+  broker: YOUR_BROKER_HOST
+  port: YOUR_BROKER_PORT
+  birth_message:
+    topic: airgradient/connected
+    payload: 2
+  will_message:
+    topic: airgradient/connected
+    payload: 0
+
+i2c:
+  sda: D2
+  scl: D1
+
+font:
+  - file: "fonts/OpenSans-Regular.ttf"
+    id: opensans
+    size: 10
+
+display:
+  - platform: ssd1306_i2c
+    id: oled
+    model: "SSD1306 64x48"
+    contrast: 5%
+    pages:
+      - id: page1
+        lambda: |-
+          it.printf(0, 0, id(opensans), "T: %.0f°", id(temp).state);
+          it.printf(it.get_width(), 0, id(opensans), TextAlign::TOP_RIGHT, "H: %.0f%%", id(humidity).state);
+          it.print(0, 10, id(opensans), "CO2:");
+          if (id(co2).state >= 2500) {
+            it.print(it.get_width(), 10, id(opensans), TextAlign::TOP_RIGHT, "OMG");
+          } else if (id(co2).state >= 1500) {
+            it.print(it.get_width(), 10, id(opensans), TextAlign::TOP_RIGHT, "BAD");
+          } else if (id(co2).state > 1000) {
+            it.print(it.get_width(), 10, id(opensans), TextAlign::TOP_RIGHT, "WARN");
+          } else if (id(co2).state > 600) {
+            it.print(it.get_width(), 10, id(opensans), TextAlign::TOP_RIGHT, "GOOD");
+          } else {
+            it.print(it.get_width(), 0, id(opensans), TextAlign::TOP_RIGHT, "GREAT");
+          }
+          it.print(0, 20, id(opensans), "PM25:");
+          if (id(pms_set).state) {
+            it.print(it.get_width(), 20, id(opensans), TextAlign::TOP_RIGHT, "...");
+          } else if (id(pm25).state >= 75) {
+            it.print(it.get_width(), 20, id(opensans), TextAlign::TOP_RIGHT, "OMG");
+          } else if (id(pm25).state >= 55) {
+            it.print(it.get_width(), 20, id(opensans), TextAlign::TOP_RIGHT, "BAD");
+          } else if (id(pm25).state >= 35) {
+            it.print(it.get_width(), 20, id(opensans), TextAlign::TOP_RIGHT, "WARN");
+          } else if (id(pm25).state >= 15) {
+            it.print(it.get_width(), 20, id(opensans), TextAlign::TOP_RIGHT, "GOOD");
+          } else {
+            it.print(it.get_width(), 20, id(opensans), TextAlign::TOP_RIGHT, "GREAT");
+          }
+          it.print(0, 30, id(opensans), "VOC:");
+          if (id(voc).state > 300) {
+            it.print(it.get_width(), 30, id(opensans), TextAlign::TOP_RIGHT, "WTF!");
+          } else if (id(pm25).state > 200) {
+            it.print(it.get_width(), 30, id(opensans), TextAlign::TOP_RIGHT, "OMG");
+          } else if (id(pm25).state > 150) {
+            it.print(it.get_width(), 30, id(opensans), TextAlign::TOP_RIGHT, "BAD");
+          } else if (id(pm25).state > 100) {
+            it.print(it.get_width(), 30, id(opensans), TextAlign::TOP_RIGHT, "WARN");
+          } else if (id(pm25).state > 50) {
+            it.print(it.get_width(), 30, id(opensans), TextAlign::TOP_RIGHT, "OK");
+          } else if (id(pm25).state <= 50) {
+            it.print(it.get_width(), 30, id(opensans), TextAlign::TOP_RIGHT, "GOOD");
+          }
+      - id: page2
+        lambda: |-
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+switch:
+  - platform: gpio
+    pin:
+      number: D7
+    id: pms_set
+    name: "Start measuring"
+    state_topic: "airgradient/status/pm25_on"
+
+interval:
+  - interval: 5s
+    then:
+      - display.page.show_next: oled
+      - component.update: oled
+  - interval: 120s
+    then:
+      - switch.turn_on: pms_set
+      - delay: 30s
+      - switch.turn_off: pms_set
+
+uart:
+  - rx_pin: D5
+    tx_pin: D6
+    baud_rate: 9600
+    id: uart1
+  - rx_pin: D4
+    tx_pin: D3
+    baud_rate: 9600
+    id: uart2
+
+sensor:
+  - platform: sht3xd
+    temperature:
+      id: temp
+      name: "Temperature"
+      state_topic: "airgradient/status/temp"
+      filters:
+        - offset: -0.7
+    humidity:
+      id: humidity
+      name: "Humidity"
+      state_topic: "airgradient/status/humid"
+    address: 0x44
+    update_interval: 30s
+  - platform: pmsx003
+    type: PMSX003
+    uart_id: uart1
+    pm_2_5:
+      id: pm25
+      name: "Particulate Matter <2.5µm Concentration"
+      state_topic: "airgradient/status/pm25"
+  - platform: senseair
+    uart_id: uart2
+    co2:
+      id: co2
+      name: "SenseAir CO2 Value"
+      state_topic: "airgradient/status/co2"
+    update_interval: 30s
+  - platform: sgp40
+    id: voc
+    name: "Volatile Organic Compounds"
+    state_topic: "airgradient/status/voc"
+    update_interval: 30s
+    compensation:
+      humidity_source: humidity
+      temperature_source: temp
